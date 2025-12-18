@@ -1,0 +1,47 @@
+﻿{% extends "base.html" %}
+{% block title %}Employee Check-in{% endblock %}
+{% block content %}
+<section>
+    <h2>Employee Check-in</h2>
+    <div>
+        <button type="button" onclick="sendCheckin('IN')">上班打卡 (IN)</button>
+        <button type="button" onclick="sendCheckin('OUT')">下班打卡 (OUT)</button>
+    </div>
+    <div id="result" style="margin-top: 12px; font-family: monospace;"></div>
+</section>
+<script>
+(function() {
+    console.log("checkin script loaded");
+
+    window.sendCheckin = async function(type) {
+        var resultEl = document.getElementById("result");
+        resultEl.textContent = "Submitting...";
+        try {
+            var res = await fetch("/api/checkin", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ "check_type": type })
+            });
+
+            if (res.redirected) {
+                window.location.href = res.url;
+                return;
+            }
+
+            var statusText = "HTTP " + res.status;
+            var bodyText = "";
+            try {
+                var json = await res.json();
+                bodyText = JSON.stringify(json);
+            } catch (e) {
+                bodyText = "No JSON body";
+            }
+            resultEl.textContent = statusText + " " + bodyText;
+        } catch (e) {
+            resultEl.textContent = "Error: " + e;
+        }
+    };
+})();
+</script>
+{% endblock %}

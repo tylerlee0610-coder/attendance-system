@@ -1,0 +1,18 @@
+services:
+  db:
+    image: mysql:8.0
+    container_name: ada-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: ada
+      MYSQL_USER: ada
+      MYSQL_PASSWORD: adapass
+      TZ: Asia/Taipei
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+
+volumes:
+  db_data:

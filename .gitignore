@@ -1,0 +1,14 @@
+# local secrets & test artifacts
+.env
+cookies.txt
+
+# editor
+.vscode/
+
+# python venv
+.venv/
+__pycache__/
+*.pyc
+
+# docker volume (if you use named volumes this may not appear)
+db_data/

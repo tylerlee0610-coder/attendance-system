@@ -17,7 +17,7 @@
 本系統採用標準的分層架構，以確保職責分離,。
 * **前台 (WebUI)**：負責顯示資料與使用者（員工）互動，使用 Jinja2 渲染 HTML。
 * **後台 (Controller/API)**：負責接收請求（考勤、請假），驗證輸入與回應結果。
-* **服務層 (Service)**：負責核心業務邏輯運算，例如判斷遲到、計算工時、處理請假餘額。
+* **服務層 (Service)**：負責核心業務邏輯運算，例如判斷遲到、計算工時、處理請假餘額，Controller 只做輸入驗證/路由，Repository 只做資料 CRUD，避免業務規則外洩。
 * **資料層 (Repository/DB)**：負責與資料庫進行 CRUD 存取（例如 `CheckInRecord`、`LeaveRecord`）。
 > **資料流向說明**：使用者操作 WebUI $\rightarrow$ 發送 HTTP 請求至 Controller $\rightarrow$ 呼叫 Service 處理邏輯 $\rightarrow$ 透過 Repository 存取 DB,。
 ## 3. 頁面架構列表 (Page Architecture) —— ⭐ 最重要
@@ -49,6 +49,9 @@ Admin 的職責是全系統的配置、帳號管理和全公司數據的宏觀�
 | **假別餘額總覽** (`/admin/leave/overview`) | 顯示**所有員工**各假別餘額與使用狀況 | 匯出功能 (Excel/CSV)、顯示異常警示, |
 | **系統設定頁** (`/admin/settings`) | 假別類型設定、假別累計規則、代理審核設定 (FR-09, FR-10) | **權限控管**、審核流程設計,, |
 | **帳號管理頁** (`/admin/users`) | 員工帳號 CRUD、角色指派（FR-08, FR-09） | 建立/停用帳號、重設密碼 |
+### 3.4 路由策略（HTML 與 API 分離）
+* **頁面 (HTML)**：`GET /checkin`、`GET /manager/dashboard`、`GET /admin/users` 等，回傳 Jinja2 SSR HTML。
+* **API (JSON)**：皆以 `/api` 開頭，例如 `POST /api/checkin`、`POST /api/manager/review/{id}`、`POST /api/admin/users`，供表單提交與日後 SPA/行動端複用。
 ## 4. 系統架構圖 (System Architecture Diagram)
 使用 Mermaid 語法呈現高階分層結構，強調資料流向。
 ```mermaid
@@ -96,6 +99,12 @@ Svc-->>Ctl: 18. 回傳審核成功
 | **前端渲染** | **Jinja2** | 作為 Python 後端的主要模板引擎，負責將後端數據渲染成 HTML 頁面。 |
 | **資料庫** | **MySQL** | 穩定且功能完整的關聯式資料庫。 |
 | **資料庫存取 (ORM)** | **SQLAlchemy** (async) | 作為資料層 (Repository) 的主要工具。 |
-| **環境管理** | **Docker** | 確保專案可客製化、模組化，並支援雲端與本地部署版本。 |
+| **環境管理** | **Docker** | 開發期容器僅啟 DB、FastAPI 在本機跑；後續再整合完整服務，維持跨環境模組化。 |
 | **強制性開發工具** | **NotebookLM, Gemini CLI, GitHub** | 嚴格遵守專題規範。 |
 | **開發環境** | **VS Code (Visual Studio Code)** | 輕量且免費，更適合 Python 初學者，取代了 PyCharm Professional。 |
+## 7. 補充架構與業務決策
+* **分層保持**：維持 Controller/Service/Repository 架構，業務邏輯只放在 Service。
+* **出勤策略 A**：不新增每日彙總表（不建 AttendanceDaily），遲到/未打卡/請假由查詢計算得出。
+* **遲到規則**：上班時間 09:00、容忍 5 分鐘，先以固定常數實作（如 `WORK_START=09:00`、`GRACE_MINUTES=5`），後續再抽為可配置項。
+* **驗證方式**：採 Session Cookie，適配 Jinja2 SSR，並補齊登入/登出流程與員工/主管/Admin 的 RBAC 控制。
+* **Docker 策略**：開發階段 Docker 只跑資料庫，FastAPI 保持本機執行，SA/SD 皆記錄此開發方式。 |
