@@ -1,0 +1,86 @@
+﻿{% extends "base.html" %}
+{% block title %}請假申請{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto bg-white border border-slate-200 rounded-2xl shadow-lg p-6 space-y-4 transition transform hover:-translate-y-0.5 hover:shadow-xl">
+    <div>
+        <h2 class="text-lg font-semibold text-slate-800">請假申請</h2>
+        <p class="text-sm text-slate-500">送出後狀態為 PENDING，可附上圖片佐證（選填）。</p>
+    </div>
+    <form id="leave-form" onsubmit="submitLeave(event)" enctype="multipart/form-data" class="grid gap-4 md:grid-cols-2">
+        <div class="space-y-1">
+            <label for="leave_type" class="text-sm font-medium text-slate-700">假別</label>
+            <select id="leave_type" name="leave_type" required
+                    class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                <option value="">請選擇</option>
+                <option value="病假">病假</option>
+                <option value="事假">事假</option>
+                <option value="公假">公假</option>
+                <option value="喪假">喪假</option>
+                <option value="婚假">婚假</option>
+                <option value="產假">產假</option>
+                <option value="其他">其他</option>
+            </select>
+        </div>
+        <div class="space-y-1">
+            <label for="attachment" class="text-sm font-medium text-slate-700">附件（圖片，選填）</label>
+            <input id="attachment" name="attachment" type="file" accept="image/*"
+                   class="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+        </div>
+        <div class="space-y-1">
+            <label for="start_time" class="text-sm font-medium text-slate-700">開始時間</label>
+            <input id="start_time" name="start_time" type="datetime-local" required
+                   class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+        </div>
+        <div class="space-y-1">
+            <label for="end_time" class="text-sm font-medium text-slate-700">結束時間</label>
+            <input id="end_time" name="end_time" type="datetime-local" required
+                   class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+        </div>
+        <div class="md:col-span-2 space-y-1">
+            <label for="reason" class="text-sm font-medium text-slate-700">原因</label>
+            <textarea id="reason" name="reason" rows="3" placeholder="請假原因"
+                      class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"></textarea>
+        </div>
+        <div class="md:col-span-2 flex gap-3 items-center">
+        <button type="submit" class="px-4 py-2.5 rounded-md bg-primary-600 text-white text-sm font-semibold shadow hover:bg-primary-700">送出</button>
+            <div id="result" class="text-sm text-slate-600 flex-1"></div>
+        </div>
+    </form>
+</div>
+<script>
+(function() {
+    console.log("leave apply script loaded");
+
+    window.submitLeave = async function(event) {
+        event.preventDefault();
+        var resultEl = document.getElementById("result");
+        resultEl.textContent = "送出中...";
+        var formEl = document.getElementById("leave-form");
+        var formData = new FormData(formEl);
+        try {
+            var res = await fetch("/api/leave/apply", {
+                method: "POST",
+                credentials: "same-origin",
+                body: formData
+            });
+            if (res.redirected) {
+                window.location.href = res.url;
+                return;
+            }
+            if (!res.ok) {
+                resultEl.textContent = "失敗，HTTP " + res.status;
+                return;
+            }
+            var data = {};
+            try { data = await res.json(); } catch (e) { data = {}; }
+            resultEl.textContent = "請假已送出，狀態: " + (data.status || "PENDING");
+            if (res.ok) {
+                formEl.reset();
+            }
+        } catch (e) {
+            resultEl.textContent = "Error: " + e;
+        }
+    };
+})();
+</script>
+{% endblock %}

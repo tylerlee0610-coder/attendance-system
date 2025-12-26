@@ -13,6 +13,21 @@ services:
       - "3306:3306"
     volumes:
       - db_data:/var/lib/mysql
+  app:
+    image: python:3.11-slim
+    container_name: ada-app
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: /bin/sh -c "apt-get update && apt-get install -y build-essential && pip install --no-cache-dir -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    environment:
+      - DATABASE_URL=mysql+asyncmy://ada:adapass@db:3306/ada?charset=utf8mb4
+      - SESSION_SECRET=dev-secret-change-me
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    restart: unless-stopped
 
 volumes:
   db_data:

@@ -1,0 +1,150 @@
+﻿{% extends "base.html" %}
+{% block title %}部門管理{% endblock %}
+{% block content %}
+<div class="grid gap-6 lg:grid-cols-2">
+    <div class="bg-white border border-slate-200 rounded-2xl shadow-lg p-6 space-y-4 transition transform hover:-translate-y-0.5 hover:shadow-xl">
+        <div>
+            <h2 class="text-lg font-semibold text-slate-800">新增部門</h2>
+            <p class="text-sm text-slate-500">可選擇主管 ID</p>
+        </div>
+        <form id="dept-form" class="space-y-3" onsubmit="createDept(event)">
+            <div class="space-y-1">
+                <label class="text-sm font-medium text-slate-700" for="dept_name">部門名稱</label>
+                <input id="dept_name" name="name" type="text" required
+                       class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+            </div>
+            <div class="space-y-1">
+                <label class="text-sm font-medium text-slate-700" for="dept_manager">主管 ID（可空白）</label>
+                <input id="dept_manager" name="manager_id" type="number" min="1"
+                       class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+            </div>
+            <div class="flex gap-3 items-center">
+                <button type="submit" class="px-4 py-2.5 rounded-md bg-primary-600 text-white text-sm font-semibold shadow hover:bg-primary-700">新增</button>
+                <div id="dept-result" class="text-sm text-slate-600 flex-1"></div>
+            </div>
+        </form>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-2xl shadow-lg p-6 space-y-4 transition transform hover:-translate-y-0.5 hover:shadow-xl">
+        <div class="flex items-center justify-between">
+            <div>
+                <h2 class="text-lg font-semibold text-slate-800">部門列表</h2>
+                <p class="text-sm text-slate-500">含主管與成員</p>
+            </div>
+            <button type="button" onclick="loadDepts()" class="px-3 py-2 rounded-md bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700">重新整理</button>
+        </div>
+        <div id="depts" class="text-sm text-slate-700"></div>
+    </div>
+</div>
+<div class="mt-6 bg-white border border-slate-200 rounded-2xl shadow-lg p-6 space-y-4 transition transform hover:-translate-y-0.5 hover:shadow-xl">
+    <div>
+        <h2 class="text-lg font-semibold text-slate-800">指派員工至部門</h2>
+        <p class="text-sm text-slate-500">可同時設定主管</p>
+    </div>
+    <form id="assign-form" class="grid gap-3 md:grid-cols-3" onsubmit="assignUser(event)">
+        <div class="space-y-1">
+            <label class="text-sm font-medium text-slate-700" for="assign_dept">部門 ID</label>
+            <input id="assign_dept" type="number" min="1" required
+                   class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+        </div>
+        <div class="space-y-1">
+            <label class="text-sm font-medium text-slate-700" for="assign_user">使用者 ID</label>
+            <input id="assign_user" type="number" min="1" required
+                   class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+        </div>
+        <div class="flex items-center gap-2">
+            <input id="assign_manager" type="checkbox" class="h-4 w-4 text-primary-600 border-slate-300 rounded">
+            <label for="assign_manager" class="text-sm text-slate-700">同時設為主管</label>
+        </div>
+        <div class="md:col-span-3 flex gap-3 items-center">
+            <button type="submit" class="px-4 py-2.5 rounded-md bg-primary-600 text-white text-sm font-semibold shadow hover:bg-primary-700">指派</button>
+            <div id="assign-result" class="text-sm text-slate-600 flex-1"></div>
+        </div>
+    </form>
+</div>
+<script>
+(function() {
+    console.log("admin departments script loaded");
+
+    function renderDepts(data) {
+        var box = document.getElementById("depts");
+        if (!Array.isArray(data) || data.length === 0) {
+            box.textContent = "尚無部門";
+            return;
+        }
+        var html = '<div class="space-y-4">';
+        data.forEach(function(d) {
+            html += '<div class="border border-slate-200 rounded-xl p-4 bg-slate-50">' +
+                '<div class="flex items-center justify-between">' +
+                    '<div class="font-semibold text-slate-800">' + d.name + ' (ID ' + d.id + ')</div>' +
+                    '<div class="text-sm text-slate-600">主管: ' + (d.manager_name || d.manager_id || '未指定') + '</div>' +
+                '</div>' +
+                '<div class="mt-2 text-sm text-slate-700">成員: ' + (d.members && d.members.length ? d.members.map(function(m){ return m.username + "("+m.role+")"; }).join("，") : "無") + '</div>' +
+            '</div>';
+        });
+        html += '</div>';
+        box.innerHTML = html;
+    }
+
+    window.loadDepts = async function() {
+        var box = document.getElementById("depts");
+        box.textContent = "載入中...";
+        try {
+            var res = await fetch("/api/admin/departments", { method: "GET", credentials: "same-origin" });
+            if (res.redirected) { window.location.href = res.url; return; }
+            if (!res.ok) { box.textContent = "讀取失敗: HTTP " + res.status; return; }
+            var data = await res.json();
+            renderDepts(data);
+        } catch (e) { box.textContent = "Error: " + e; }
+    };
+
+    window.createDept = async function(event) {
+        event.preventDefault();
+        var msg = document.getElementById("dept-result");
+        msg.textContent = "送出中...";
+        var payload = {
+            name: document.getElementById("dept_name").value,
+            manager_id: document.getElementById("dept_manager").value || null
+        };
+        if (payload.manager_id) payload.manager_id = parseInt(payload.manager_id, 10);
+        try {
+            var res = await fetch("/api/admin/departments", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            if (res.redirected) { window.location.href = res.url; return; }
+            if (!res.ok) { msg.textContent = "失敗: HTTP " + res.status; return; }
+            msg.textContent = "建立成功";
+            document.getElementById("dept-form").reset();
+            loadDepts();
+        } catch (e) { msg.textContent = "Error: " + e; }
+    };
+
+    window.assignUser = async function(event) {
+        event.preventDefault();
+        var msg = document.getElementById("assign-result");
+        msg.textContent = "送出中...";
+        var deptId = parseInt(document.getElementById("assign_dept").value, 10);
+        var userId = parseInt(document.getElementById("assign_user").value, 10);
+        var setMgr = document.getElementById("assign_manager").checked;
+        var payload = { user_id: userId, set_manager: setMgr };
+        try {
+            var res = await fetch("/api/admin/departments/" + deptId + "/assign", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            if (res.redirected) { window.location.href = res.url; return; }
+            if (!res.ok) { msg.textContent = "失敗: HTTP " + res.status; return; }
+            msg.textContent = "指派成功";
+            document.getElementById("assign-form").reset();
+            loadDepts();
+        } catch (e) { msg.textContent = "Error: " + e; }
+    };
+
+    loadDepts();
+})();
+</script>
+{% endblock %}

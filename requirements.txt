@@ -5,6 +5,6 @@ python-multipart
 itsdangerous
 sqlalchemy
 asyncmy
+cryptography
 black
 ruff
-

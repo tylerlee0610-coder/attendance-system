@@ -1,8 +1,174 @@
 ﻿{% extends "base.html" %}
-{% block title %}Admin Users{% endblock %}
+{% block title %}帳號管理{% endblock %}
 {% block content %}
-<section>
-    <h2>Admin User Management</h2>
-    <p>Placeholder page for managing users. CRUD and role assignment will be added later.</p>
-</section>
+<div class="grid gap-6 lg:grid-cols-2">
+    <div class="bg-white border border-slate-200 rounded-2xl shadow-lg p-6 space-y-4 transition transform hover:-translate-y-0.5 hover:shadow-xl">
+        <div>
+            <h2 class="text-lg font-semibold text-slate-800">新增帳號</h2>
+            <p class="text-sm text-slate-500">角色可選員工/主管/Admin</p>
+        </div>
+        <form id="user-form" class="space-y-3" onsubmit="createUser(event)">
+            <div class="space-y-1">
+                <label class="text-sm font-medium text-slate-700" for="name">姓名</label>
+                <input id="name" name="name" type="text" required
+                       class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+            </div>
+            <div class="space-y-1">
+                <label class="text-sm font-medium text-slate-700" for="username">帳號</label>
+                <input id="username" name="username" type="text" required
+                       class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+            </div>
+            <div class="space-y-1">
+                <label class="text-sm font-medium text-slate-700" for="password">密碼</label>
+                <input id="password" name="password" type="password" required
+                       class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+            </div>
+            <div class="space-y-1">
+                <label class="text-sm font-medium text-slate-700" for="role">角色</label>
+                <select id="role" name="role" required
+                        class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                    <option value="employee">員工</option>
+                    <option value="manager">主管</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <div class="flex gap-3 items-center">
+                <button type="submit" class="px-4 py-2.5 rounded-md bg-primary-600 text-white text-sm font-semibold shadow hover:bg-primary-700">新增</button>
+                <div id="form-result" class="text-sm text-slate-600 flex-1"></div>
+            </div>
+        </form>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-2xl shadow-lg p-6 space-y-4 transition transform hover:-translate-y-0.5 hover:shadow-xl">
+        <div class="flex items-center justify-between">
+            <div>
+                <h2 class="text-lg font-semibold text-slate-800">帳號列表</h2>
+                <p class="text-sm text-slate-500">最多 200 筆，可調整角色與刪除</p>
+            </div>
+            <button type="button" onclick="loadUsers()" class="px-3 py-2 rounded-md bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700">重新整理</button>
+        </div>
+        <div id="users" class="text-sm text-slate-700"></div>
+    </div>
+</div>
+<script>
+(function() {
+    console.log("admin users script loaded");
+
+    function renderUsers(data) {
+        var box = document.getElementById("users");
+        if (!Array.isArray(data) || data.length === 0) {
+            box.textContent = "尚無帳號";
+            return;
+        }
+        var html = '<div class="overflow-x-auto"><table class="min-w-full divide-y divide-slate-200">';
+        html += '<thead class="bg-slate-50"><tr>' +
+            '<th class="px-3 py-2 text-left text-xs font-semibold text-slate-600">ID</th>' +
+            '<th class="px-3 py-2 text-left text-xs font-semibold text-slate-600">姓名</th>' +
+            '<th class="px-3 py-2 text-left text-xs font-semibold text-slate-600">帳號</th>' +
+            '<th class="px-3 py-2 text-left text-xs font-semibold text-slate-600">角色</th>' +
+            '<th class="px-3 py-2 text-left text-xs font-semibold text-slate-600">建立時間</th>' +
+            '<th class="px-3 py-2 text-left text-xs font-semibold text-slate-600">動作</th>' +
+            '</tr></thead><tbody class="divide-y divide-slate-200">';
+        data.forEach(function(u) {
+            html += '<tr class="hover:bg-slate-50">' +
+                '<td class="px-3 py-2 text-sm text-slate-800">' + u.id + '</td>' +
+                '<td class="px-3 py-2 text-sm text-slate-800">' + (u.name || '') + '</td>' +
+                '<td class="px-3 py-2 text-sm text-slate-800">' + u.username + '</td>' +
+                '<td class="px-3 py-2 text-sm text-slate-800">' +
+                    '<select id="role-' + u.id + '" class="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">' +
+                        '<option value="employee"' + (u.role === 'employee' ? ' selected' : '') + '>員工</option>' +
+                        '<option value="manager"' + (u.role === 'manager' ? ' selected' : '') + '>主管</option>' +
+                        '<option value="admin"' + (u.role === 'admin' ? ' selected' : '') + '>Admin</option>' +
+                    '</select>' +
+                '</td>' +
+                '<td class="px-3 py-2 text-sm text-slate-800">' + (u.created_at || "") + '</td>' +
+                '<td class="px-3 py-2 text-sm text-slate-800 space-x-2">' +
+                    '<button type="button" onclick="updateRole(' + u.id + ')" class="px-3 py-1.5 rounded-md bg-primary-600 text-white text-xs font-semibold hover:bg-primary-700">更新角色</button>' +
+                    '<button type="button" onclick="deleteUser(' + u.id + ')" class="px-3 py-1.5 rounded-md bg-red-600 text-white text-xs font-semibold hover:bg-red-700">刪除</button>' +
+                '</td>' +
+                '</tr>';
+        });
+        html += '</tbody></table></div>';
+        box.innerHTML = html;
+    }
+
+    window.loadUsers = async function() {
+        var box = document.getElementById("users");
+        box.textContent = "載入中...";
+        try {
+            var res = await fetch("/api/admin/users", {
+                method: "GET",
+                credentials: "same-origin"
+            });
+            if (res.redirected) { window.location.href = res.url; return; }
+            if (!res.ok) { box.textContent = "讀取失敗: HTTP " + res.status; return; }
+            var data = await res.json();
+            renderUsers(data);
+        } catch (e) {
+            box.textContent = "Error: " + e;
+        }
+    };
+
+    window.createUser = async function(event) {
+        event.preventDefault();
+        var msg = document.getElementById("form-result");
+        msg.textContent = "送出中...";
+        var payload = {
+            name: document.getElementById("name").value,
+            username: document.getElementById("username").value,
+            password: document.getElementById("password").value,
+            role: document.getElementById("role").value
+        };
+        try {
+            var res = await fetch("/api/admin/users", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            if (res.redirected) { window.location.href = res.url; return; }
+            if (!res.ok) { msg.textContent = "失敗: HTTP " + res.status; return; }
+            msg.textContent = "建立成功";
+            document.getElementById("user-form").reset();
+            loadUsers();
+        } catch (e) {
+            msg.textContent = "Error: " + e;
+        }
+    };
+
+    window.updateRole = async function(userId) {
+        var selectEl = document.getElementById('role-' + userId);
+        var msg = document.getElementById("form-result");
+        msg.textContent = "更新中...";
+        try {
+            var res = await fetch("/api/admin/users/" + userId, {
+                method: "PATCH",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ role: selectEl.value })
+            });
+            if (res.redirected) { window.location.href = res.url; return; }
+            if (!res.ok) { msg.textContent = "更新失敗: HTTP " + res.status; return; }
+            msg.textContent = "更新成功";
+            loadUsers();
+        } catch (e) { msg.textContent = "Error: " + e; }
+    };
+
+    window.deleteUser = async function(userId) {
+        var msg = document.getElementById("form-result");
+        msg.textContent = "刪除中...";
+        try {
+            var res = await fetch("/api/admin/users/" + userId, {
+                method: "DELETE",
+                credentials: "same-origin"
+            });
+            if (res.redirected) { window.location.href = res.url; return; }
+            if (!res.ok) { msg.textContent = "刪除失敗: HTTP " + res.status; return; }
+            msg.textContent = "刪除成功";
+            loadUsers();
+        } catch (e) { msg.textContent = "Error: " + e; }
+    };
+
+    loadUsers();
+})();
+</script>
 {% endblock %}

@@ -4,22 +4,66 @@
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Smart Attendance{% endblock %}</title>
+    <title>{% block title %}智慧考勤{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: {
+                50: '#eef2ff',
+                100: '#e0e7ff',
+                500: '#4f46e5',
+                600: '#4338ca',
+                700: '#3730a3'
+              },
+            }
+          }
+        }
+      }
+    </script>
 </head>
-<body>
-    <header>
-        <h1>Smart Attendance &amp; Leave</h1>
-        <nav>
-            <a href="/checkin">Employee</a>
-            <a href="/manager/dashboard">Manager</a>
-            <a href="/admin/users">Admin</a>
-            <a href="/login">Login</a>
-        </nav>
-        <form method="post" action="/logout" style="margin-top: 8px;">
-            <button type="submit">Logout</button>
-        </form>
+<body class="bg-gradient-to-b from-slate-50 via-white to-slate-50 text-slate-900 min-h-screen text-base md:text-lg">
+    <header class="bg-white/80 backdrop-blur border-b border-slate-200/80 shadow-sm">
+        <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+            <div class="text-xl font-semibold text-primary-700 tracking-tight">智慧考勤與假勤</div>
+            <div class="flex items-center gap-4">
+                <nav class="flex items-center gap-2 text-sm md:text-base font-medium">
+                    {% set role = request.session.get("role") if request.session else None %}
+                    {% if role %}
+                    {% if role != "admin" %}
+                    <a href="/checkin" class="px-3 py-2 rounded-full hover:bg-primary-50 hover:text-primary-700 transition">打卡</a>
+                    <a href="/records" class="px-3 py-2 rounded-full hover:bg-primary-50 hover:text-primary-700 transition">打卡紀錄</a>
+                    <a href="/apply/manual" class="px-3 py-2 rounded-full hover:bg-primary-50 hover:text-primary-700 transition">補卡申請</a>
+                    <a href="/leave/apply" class="px-3 py-2 rounded-full hover:bg-primary-50 hover:text-primary-700 transition">請假申請</a>
+                    <a href="/leave/records" class="px-3 py-2 rounded-full hover:bg-primary-50 hover:text-primary-700 transition">請假紀錄</a>
+                    <a href="/alerts" class="px-3 py-2 rounded-full hover:bg-primary-50 hover:text-primary-700 transition">異常提醒</a>
+                    {% endif %}
+                    {% if role == "manager" or role == "admin" %}
+                    <a href="/manager/records" class="px-3 py-2 rounded-full hover:bg-primary-50 hover:text-primary-700 transition">團隊打卡</a>
+                    <a href="/manager/review" class="px-3 py-2 rounded-full hover:bg-primary-50 hover:text-primary-700 transition">請假審核</a>
+                    <a href="/manager/manual" class="px-3 py-2 rounded-full hover:bg-primary-50 hover:text-primary-700 transition">補卡審核</a>
+                    {% endif %}
+                    {% if role == "admin" %}
+                    <a href="/admin/users" class="px-3 py-2 rounded-full hover:bg-primary-50 hover:text-primary-700 transition">帳號管理</a>
+                    <a href="/admin/leave/approved" class="px-3 py-2 rounded-full hover:bg-primary-50 hover:text-primary-700 transition">已核准請假</a>
+                    <a href="/admin/departments" class="px-3 py-2 rounded-full hover:bg-primary-50 hover:text-primary-700 transition">部門管理</a>
+                    {% endif %}
+                    {% endif %}
+                    {% if not role %}
+                    <a href="/login" class="px-3 py-2 rounded-full hover:bg-primary-50 hover:text-primary-700 transition">登入</a>
+                    {% endif %}
+                </nav>
+                {% if role %}
+                <form method="post" action="/logout">
+                    <button type="submit" class="px-3 py-2 rounded-md text-sm md:text-base bg-slate-800 text-white hover:bg-slate-900 shadow transition transform hover:-translate-y-0.5">登出</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
     </header>
-    <main>
+    <main class="max-w-6xl mx-auto px-4 py-10">
         {% block content %}{% endblock %}
     </main>
 </body>

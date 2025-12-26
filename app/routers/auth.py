@@ -15,7 +15,7 @@ router = APIRouter()
 
 ROLE_HOME = {
     "employee": "/checkin",
-    "manager": "/manager/dashboard",
+    "manager": "/manager/records",
     "admin": "/admin/users",
 }
 

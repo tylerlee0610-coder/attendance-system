@@ -1,27 +1,68 @@
 ﻿{% extends "base.html" %}
-{% block title %}Employee Check-in{% endblock %}
+{% block title %}員工打卡{% endblock %}
 {% block content %}
-<section>
-    <h2>Employee Check-in</h2>
-    <div>
-        <button type="button" onclick="sendCheckin('IN')">上班打卡 (IN)</button>
-        <button type="button" onclick="sendCheckin('OUT')">下班打卡 (OUT)</button>
+<div class="grid gap-6 md:grid-cols-2">
+    <div class="bg-white border border-slate-200 rounded-2xl shadow-lg p-6 space-y-4 transition transform hover:-translate-y-0.5 hover:shadow-xl">
+        <div>
+            <h2 class="text-lg font-semibold text-slate-800">打卡動作</h2>
+            <p class="text-sm text-slate-500">支援定位並送往 /api/checkin</p>
+        </div>
+        <div class="flex flex-wrap gap-3">
+            <button type="button" onclick="sendCheckin('IN')" class="px-4 py-2.5 rounded-md bg-primary-600 text-white text-sm font-semibold shadow hover:bg-primary-700">上班打卡</button>
+            <button type="button" onclick="sendCheckin('OUT')" class="px-4 py-2.5 rounded-md bg-slate-800 text-white text-sm font-semibold shadow hover:bg-slate-900">下班打卡</button>
+        </div>
+        <div class="text-sm text-slate-600">若未授權定位仍可送出，但不包含 GPS。</div>
     </div>
-    <div id="result" style="margin-top: 12px; font-family: monospace;"></div>
-</section>
+    <div class="bg-white border border-slate-200 rounded-2xl shadow-lg p-6 transition transform hover:-translate-y-0.5 hover:shadow-xl">
+        <h3 class="text-sm font-semibold text-slate-700 mb-2">回應</h3>
+        <div id="result" class="min-h-[160px] text-base bg-slate-50 border border-slate-200 rounded-lg p-3 text-slate-800 overflow-auto"></div>
+    </div>
+</div>
 <script>
 (function() {
     console.log("checkin script loaded");
 
+    function getLocation() {
+        return new Promise(function(resolve) {
+            if (!navigator.geolocation) {
+                resolve({ lat: null, lng: null, note: "no geolocation" });
+                return;
+            }
+            navigator.geolocation.getCurrentPosition(
+                function(pos) {
+                    resolve({
+                        lat: pos.coords.latitude,
+                        lng: pos.coords.longitude,
+                        note: "ok"
+                    });
+                },
+                function(err) {
+                    console.warn("geolocation error", err);
+                    resolve({ lat: null, lng: null, note: "error" });
+                },
+                { enableHighAccuracy: false, timeout: 5000, maximumAge: 0 }
+            );
+        });
+    }
+
     window.sendCheckin = async function(type) {
         var resultEl = document.getElementById("result");
-        resultEl.textContent = "Submitting...";
+        resultEl.textContent = "取得定位中...";
+        var loc = await getLocation();
+        resultEl.textContent = "送出中...";
+
+        var payload = { "check_type": type };
+        if (loc.lat !== null && loc.lng !== null) {
+            payload.latitude = loc.lat;
+            payload.longitude = loc.lng;
+        }
+
         try {
             var res = await fetch("/api/checkin", {
                 method: "POST",
                 credentials: "same-origin",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ "check_type": type })
+                body: JSON.stringify(payload)
             });
 
             if (res.redirected) {
@@ -29,15 +70,14 @@
                 return;
             }
 
-            var statusText = "HTTP " + res.status;
-            var bodyText = "";
-            try {
-                var json = await res.json();
-                bodyText = JSON.stringify(json);
-            } catch (e) {
-                bodyText = "No JSON body";
+            if (!res.ok) {
+                resultEl.textContent = "失敗，HTTP " + res.status;
+                return;
             }
-            resultEl.textContent = statusText + " " + bodyText;
+            var json = {};
+            try { json = await res.json(); } catch (e) { json = {}; }
+            var msg = "成功，類型: " + (json.check_type || type) + "，時間: " + (json.ts || "已記錄") + "，遲到: " + (json.is_late ? "是" : "否");
+            resultEl.textContent = msg;
         } catch (e) {
             resultEl.textContent = "Error: " + e;
         }

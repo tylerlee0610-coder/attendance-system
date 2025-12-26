@@ -1,0 +1,74 @@
+﻿{% extends "base.html" %}
+{% block title %}補打卡申請{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto bg-white border border-slate-200 rounded-2xl shadow-lg p-6 space-y-4 transition transform hover:-translate-y-0.5 hover:shadow-xl">
+    <div>
+        <h2 class="text-lg font-semibold text-slate-800">補打卡申請</h2>
+        <p class="text-sm text-slate-500">送出後狀態為 PENDING。</p>
+    </div>
+    <form id="manual-form" onsubmit="submitManual(event)" class="grid gap-4 md:grid-cols-2">
+        <div class="space-y-1">
+            <label for="check_type" class="text-sm font-medium text-slate-700">類型</label>
+            <select id="check_type" name="check_type" required
+                    class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+                <option value="IN">上班 (IN)</option>
+                <option value="OUT">下班 (OUT)</option>
+            </select>
+        </div>
+        <div class="space-y-1">
+            <label for="requested_ts" class="text-sm font-medium text-slate-700">打卡時間</label>
+            <input id="requested_ts" name="requested_ts" type="datetime-local" required
+                   class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+        </div>
+        <div class="md:col-span-2 space-y-1">
+            <label for="reason" class="text-sm font-medium text-slate-700">原因</label>
+            <textarea id="reason" name="reason" rows="3" placeholder="遺漏打卡的原因"
+                      class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"></textarea>
+        </div>
+        <div class="md:col-span-2 flex gap-3">
+        <button type="submit" class="px-4 py-2.5 rounded-md bg-primary-600 text-white text-sm font-semibold shadow hover:bg-primary-700">送出</button>
+            <div id="result" class="text-sm text-slate-600 flex-1"></div>
+        </div>
+    </form>
+</div>
+<script>
+(function() {
+    console.log("manual apply script loaded");
+
+    window.submitManual = async function(event) {
+        event.preventDefault();
+        var resultEl = document.getElementById("result");
+        resultEl.textContent = "送出中...";
+        var payload = {
+            check_type: document.getElementById("check_type").value,
+            requested_ts: document.getElementById("requested_ts").value,
+            reason: document.getElementById("reason").value
+        };
+        try {
+            var res = await fetch("/api/manual-checkin", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            if (res.redirected) {
+                window.location.href = res.url;
+                return;
+            }
+            if (!res.ok) {
+                resultEl.textContent = "失敗，HTTP " + res.status;
+                return;
+            }
+            var data = {};
+            try { data = await res.json(); } catch (e) { data = {}; }
+            resultEl.textContent = "申請已送出，狀態: " + (data.status || "PENDING");
+            if (res.ok) {
+                document.getElementById("manual-form").reset();
+            }
+        } catch (e) {
+            resultEl.textContent = "Error: " + e;
+        }
+    };
+})();
+</script>
+{% endblock %}

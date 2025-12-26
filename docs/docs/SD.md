@@ -7,7 +7,7 @@
 | SA 頁面編號 | SA 頁面/模組名稱 | 前端檔案 (View - Jinja2) | 後端 API (Controller) | 資料表 (Entity) | 實作邏輯摘要 |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **P-01** | 登入頁 | `auth/login.html` | `POST /login` | `Employee` | 驗證帳密，發放 Session/Token |
-| **P-02** | 打卡頁面 (FR-01) | `checkin.html` | `POST /checkin` | `CheckInRecord` | **純粹記錄時間戳記**，判斷是否遲到, |
+| **P-02** | 打卡頁面 (FR-01) | `checkin.html` | `POST /checkin` | `CheckInRecord` | **記錄時間戳記與 GPS 座標**，判斷是否遲到, |
 | **P-03** | 請假申請頁 (FR-04) | `leave/apply.html` | `POST /leave/apply` | `LeaveApplication` | 顯示餘額並處理請假表單提交 |
 | **M-01** | 待審核清單 (FR-05) | `manager/review.html` | `GET /api/manager/review` | `LeaveApplication` | 顯示所屬**部門**待審核單據，主管權限檢查 |
 | **M-02** | 審核 API (FR-05) | (無獨立頁面) | `POST /api/manager/review/{id}` | `LeaveApplication` | 處理主管同意/退件邏輯，更新出勤紀錄 |
@@ -102,6 +102,8 @@ Ctl-->>Client: 11. 201 Created / JSON Response
 | | `employee_id` | `INT` | FK | 否 | 關聯員工 |
 | | `checkin_time` | `DATETIME` | | 否 | 精確打卡時間戳記 |
 | | `checkin_type` | `VARCHAR(10)` | | 否 | 上班/下班/補卡 |
+| | `latitude` | `DECIMAL(10,6)` | | 是 | 打卡 GPS 緯度 |
+| | `longitude` | `DECIMAL(10,6)` | | 是 | 打卡 GPS 經度 |
 | | `is_late` | `BOOLEAN` | | 否 | 是否遲到 (由 Service 計算) |
 | **LeaveApplication** | `id` | `INT` | PK | 否 | 假單 ID |
 | | `employee_id` | `INT` | FK | 否 | 申請員工 |
@@ -129,6 +131,8 @@ int id PK
 int employee_id FK
 datetime checkin_time
 string checkin_type
+float latitude
+float longitude
 bool is_late
 }
 LEAVE_APPLICATION {
