@@ -18,6 +18,16 @@
                 <input id="dept_manager" name="manager_id" type="number" min="1"
                        class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
             </div>
+            <div class="space-y-1">
+                <label class="text-sm font-medium text-slate-700" for="dept_late_start">上班時間（遲到標準）</label>
+                <input id="dept_late_start" name="late_start_time" type="time" value="09:00"
+                       class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+            </div>
+            <div class="space-y-1">
+                <label class="text-sm font-medium text-slate-700" for="dept_late_grace">寬限分鐘</label>
+                <input id="dept_late_grace" name="late_grace_minutes" type="number" min="0" max="120" value="5"
+                       class="w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500">
+            </div>
             <div class="flex gap-3 items-center">
                 <button type="submit" class="px-4 py-2.5 rounded-md bg-primary-600 text-white text-sm font-semibold shadow hover:bg-primary-700">新增</button>
                 <div id="dept-result" class="text-sm text-slate-600 flex-1"></div>
@@ -79,6 +89,18 @@
                     '<div class="text-sm text-slate-600">主管: ' + (d.manager_name || d.manager_id || '未指定') + '</div>' +
                 '</div>' +
                 '<div class="mt-2 text-sm text-slate-700">成員: ' + (d.members && d.members.length ? d.members.map(function(m){ return m.username + "("+m.role+")"; }).join("，") : "無") + '</div>' +
+                '<div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">' +
+                    '<span class="font-medium text-slate-700">遲到標準</span>' +
+                    '<span>上班時間</span>' +
+                    '<input id="late-start-' + d.id + '" type="time" value="' + (d.late_start_time || "09:00") + '"' +
+                        ' class="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-900">' +
+                    '<span>寬限(分鐘)</span>' +
+                    '<input id="late-grace-' + d.id + '" type="number" min="0" max="120" value="' + (d.late_grace_minutes ?? 5) + '"' +
+                        ' class="w-20 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-900">' +
+                    '<button type="button" onclick="updateLateRule(' + d.id + ')"' +
+                        ' class="px-2 py-1 rounded-md bg-slate-800 text-white text-xs font-semibold hover:bg-slate-900">更新</button>' +
+                    '<span id="late-msg-' + d.id + '" class="text-xs text-slate-500"></span>' +
+                '</div>' +
             '</div>';
         });
         html += '</div>';
@@ -103,9 +125,16 @@
         msg.textContent = "送出中...";
         var payload = {
             name: document.getElementById("dept_name").value,
-            manager_id: document.getElementById("dept_manager").value || null
+            manager_id: document.getElementById("dept_manager").value || null,
+            late_start_time: document.getElementById("dept_late_start").value,
+            late_grace_minutes: document.getElementById("dept_late_grace").value
         };
         if (payload.manager_id) payload.manager_id = parseInt(payload.manager_id, 10);
+        if (payload.late_grace_minutes !== null && payload.late_grace_minutes !== "") {
+            payload.late_grace_minutes = parseInt(payload.late_grace_minutes, 10);
+        } else {
+            payload.late_grace_minutes = null;
+        }
         try {
             var res = await fetch("/api/admin/departments", {
                 method: "POST",
@@ -117,6 +146,32 @@
             if (!res.ok) { msg.textContent = "失敗: HTTP " + res.status; return; }
             msg.textContent = "建立成功";
             document.getElementById("dept-form").reset();
+            loadDepts();
+        } catch (e) { msg.textContent = "Error: " + e; }
+    };
+
+    window.updateLateRule = async function(deptId) {
+        var msg = document.getElementById("late-msg-" + deptId);
+        var startEl = document.getElementById("late-start-" + deptId);
+        var graceEl = document.getElementById("late-grace-" + deptId);
+        if (!startEl || !graceEl) { return; }
+        var graceVal = parseInt(graceEl.value, 10);
+        if (Number.isNaN(graceVal)) {
+            msg.textContent = "????????";
+            return;
+        }
+        msg.textContent = "???...";
+        var payload = { late_start_time: startEl.value, late_grace_minutes: graceVal };
+        try {
+            var res = await fetch("/api/admin/departments/" + deptId, {
+                method: "PATCH",
+                credentials: "same-origin",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+            if (res.redirected) { window.location.href = res.url; return; }
+            if (!res.ok) { msg.textContent = "??: HTTP " + res.status; return; }
+            msg.textContent = "????";
             loadDepts();
         } catch (e) { msg.textContent = "Error: " + e; }
     };

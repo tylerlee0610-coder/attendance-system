@@ -2,19 +2,24 @@ from datetime import datetime, time, timedelta
 
 import csv
 import os
+import smtplib
+import ssl
+import logging
 from io import StringIO
 from pathlib import Path
 import hashlib
+from email.message import EmailMessage
 
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from sqlalchemy import desc, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_session
 from app.dependencies import require_role, require_roles
-from app.models import CheckInRecord, Department, LeaveApplication, ManualCheckRequest, User
+from app.models import CheckInRecord, Department, LateAlert, LeaveApplication, ManualCheckRequest, User
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger("uvicorn.error")
 
 
 async def _manager_dept_id(user: dict, session: AsyncSession) -> int | None:
@@ -26,8 +31,136 @@ async def _manager_dept_id(user: dict, session: AsyncSession) -> int | None:
     return dept_id
 
 
+DEFAULT_LATE_START = time(9, 0)
+DEFAULT_LATE_GRACE_MINUTES = 5
+
+
+def _parse_hhmm(value: str | None) -> time | None:
+    if not value:
+        return None
+    try:
+        raw = value.strip()
+        if not raw:
+            return None
+        parts = raw.split(":")
+        if len(parts) != 2:
+            return None
+        hour = int(parts[0])
+        minute = int(parts[1])
+        return time(hour=hour, minute=minute)
+    except Exception:
+        return None
+
+
+def _normalize_hhmm(value: str | None) -> str | None:
+    parsed = _parse_hhmm(value)
+    if not parsed:
+        return None
+    return parsed.strftime("%H:%M")
+
+
+async def _late_rule_for_user_id(user_id: int, session: AsyncSession) -> tuple[time, int]:
+    dept_id = await session.scalar(select(User.department_id).where(User.id == user_id))
+    if not dept_id:
+        return DEFAULT_LATE_START, DEFAULT_LATE_GRACE_MINUTES
+    dept = await session.get(Department, dept_id)
+    if not dept:
+        return DEFAULT_LATE_START, DEFAULT_LATE_GRACE_MINUTES
+    start_time = _parse_hhmm(dept.late_start_time) or DEFAULT_LATE_START
+    grace_minutes = dept.late_grace_minutes if dept.late_grace_minutes is not None else DEFAULT_LATE_GRACE_MINUTES
+    return start_time, int(grace_minutes)
+
+
+def _smtp_config() -> tuple[str, int, str, str, str] | None:
+    host = (os.getenv("SMTP_HOST") or "").strip()
+    port_raw = (os.getenv("SMTP_PORT") or "587").strip()
+    user = (os.getenv("SMTP_USER") or "").strip()
+    password = (os.getenv("SMTP_PASS") or "").strip()
+    sender = (os.getenv("SMTP_FROM") or "").strip() or user
+    if not host or not user or not password or not sender:
+        return None
+    try:
+        port = int(port_raw)
+    except Exception:
+        port = 587
+    return host, port, user, password, sender
+
+
+def _send_email_sync(to_addrs: list[str], subject: str, body: str) -> bool:
+    if not to_addrs:
+        return False
+    config = _smtp_config()
+    if not config:
+        return False
+    host, port, user, password, sender = config
+    msg = EmailMessage()
+    msg["From"] = sender
+    msg["To"] = ", ".join(to_addrs)
+    msg["Subject"] = subject
+    msg.set_content(body)
+    context = ssl.create_default_context()
+    try:
+        with smtplib.SMTP(host, port, timeout=10) as server:
+            server.starttls(context=context)
+            server.login(user, password)
+            server.send_message(msg)
+    except Exception:
+        logger.exception("late_alert_email_send_failed")
+        return False
+    logger.warning("late_alert_email_sent to=%s subject=%s", ",".join(to_addrs), subject)
+    return True
+
+
+async def _late_alert_recipients(user_id: int, session: AsyncSession) -> list[str]:
+    user = await session.get(User, user_id)
+    if not user:
+        return []
+    recipients = []
+    if user.email:
+        recipients.append(user.email)
+    if user.department_id:
+        dept = await session.get(Department, user.department_id)
+        if dept and dept.manager_id and dept.manager_id != user_id:
+            manager = await session.get(User, dept.manager_id)
+            if manager and manager.email and manager.email not in recipients:
+                recipients.append(manager.email)
+    return recipients
+
+
+async def _queue_late_alert(
+    user_id: int,
+    checkin_id: int | None,
+    late_dt: datetime,
+    session: AsyncSession,
+    background_tasks: BackgroundTasks,
+):
+    exists_stmt = select(LateAlert.id).where(
+        LateAlert.user_id == user_id,
+        LateAlert.late_date == late_dt.date(),
+    )
+    exists_id = await session.scalar(exists_stmt)
+    if exists_id:
+        return
+    recipients = await _late_alert_recipients(user_id, session)
+    if not recipients:
+        logger.warning("late_alert_skip_no_recipients user_id=%s", user_id)
+        return
+    if not _smtp_config():
+        logger.warning("late_alert_skip_no_smtp_config user_id=%s", user_id)
+        return
+    session.add(LateAlert(user_id=user_id, checkin_id=checkin_id, late_date=late_dt.date()))
+    subject = "Late alert"
+    user = await session.get(User, user_id)
+    display_name = user.name if user and user.name else f"ID {user_id}"
+    display_username = user.username if user and user.username else ""
+    name_suffix = f" ({display_username})" if display_username else ""
+    body = f"Employee {display_name}{name_suffix} checked in late at {late_dt.isoformat()}."
+    background_tasks.add_task(_send_email_sync, recipients, subject, body)
+
+
 @router.post("/checkin")
 async def api_checkin(
+    background_tasks: BackgroundTasks,
     payload: dict = Body(...),
     user: dict = Depends(require_roles({"employee", "manager"})),
     session: AsyncSession = Depends(get_session),
@@ -43,7 +176,8 @@ async def api_checkin(
         )
 
     now = datetime.now()
-    grace_end = (datetime.combine(now.date(), time(9, 0)) + timedelta(minutes=5)).time()
+    late_start, grace_minutes = await _late_rule_for_user_id(user["user_id"], session)
+    grace_end = (datetime.combine(now.date(), late_start) + timedelta(minutes=grace_minutes)).time()
     is_late = check_type == "IN" and now.time() > grace_end
 
     record = CheckInRecord(
@@ -55,6 +189,9 @@ async def api_checkin(
         is_late=is_late,
     )
     session.add(record)
+    await session.flush()
+    if is_late and check_type == "IN":
+        await _queue_late_alert(user["user_id"], record.id, now, session, background_tasks)
     await session.commit()
 
     return {
@@ -97,6 +234,7 @@ async def api_records(
 async def api_manager_records(
     limit: int = Query(100, ge=1, le=500),
     user_id: int | None = Query(None, description="Filter by user id"),
+    name: str | None = Query(None, description="Filter by name"),
     session: AsyncSession = Depends(get_session),
     current: dict = Depends(require_roles({"manager", "admin"})),
 ):
@@ -114,6 +252,8 @@ async def api_manager_records(
     )
     if user_id:
         stmt = stmt.where(CheckInRecord.user_id == user_id)
+    if name:
+        stmt = stmt.where(User.name.ilike(f"%{name.strip()}%"))
     if manager_dept:
         stmt = stmt.where(User.department_id == manager_dept)
 
@@ -140,6 +280,7 @@ async def api_manager_records(
 async def api_manager_records_export(
     limit: int = Query(1000, ge=1, le=5000),
     user_id: int | None = Query(None, description="Filter by user id"),
+    name: str | None = Query(None, description="Filter by name"),
     session: AsyncSession = Depends(get_session),
     current: dict = Depends(require_roles({"manager", "admin"})),
 ):
@@ -161,6 +302,8 @@ async def api_manager_records_export(
     )
     if user_id:
         stmt = stmt.where(CheckInRecord.user_id == user_id)
+    if name:
+        stmt = stmt.where(User.name.ilike(f"%{name.strip()}%"))
     if manager_dept:
         stmt = stmt.where(User.department_id == manager_dept)
 
@@ -168,12 +311,13 @@ async def api_manager_records_export(
     output = StringIO()
     writer = csv.writer(output)
     writer.writerow(
-        ["id", "user_id", "username", "check_type", "ts", "is_late", "latitude", "longitude"]
+        ["id", "name", "user_id", "username", "check_type", "ts", "is_late", "latitude", "longitude"]
     )
     for record, username, name in rows.all():
         writer.writerow(
             [
                 record.id,
+                name,
                 record.user_id,
                 username,
                 record.check_type,
@@ -339,6 +483,7 @@ async def api_manager_manual_list(
 
 @router.post("/manager/manual/{id}")
 async def api_manager_manual_review(
+    background_tasks: BackgroundTasks,
     id: int,
     payload: dict = Body(...),
     reviewer: dict = Depends(require_roles({"manager", "admin"})),
@@ -355,6 +500,27 @@ async def api_manager_manual_review(
         raise HTTPException(status_code=400, detail="already reviewed")
 
     req.status = "APPROVED" if action == "APPROVE" else "REJECTED"
+    if action == "APPROVE":
+        late_start, grace_minutes = await _late_rule_for_user_id(req.user_id, session)
+        grace_end = (datetime.combine(req.requested_ts.date(), late_start) + timedelta(minutes=grace_minutes)).time()
+        is_late = req.check_type == "IN" and req.requested_ts.time() > grace_end
+        exists_stmt = select(CheckInRecord.id).where(
+            CheckInRecord.user_id == req.user_id,
+            CheckInRecord.check_type == req.check_type,
+            CheckInRecord.ts == req.requested_ts,
+        )
+        exists_id = await session.scalar(exists_stmt)
+        if not exists_id:
+            record = CheckInRecord(
+                user_id=req.user_id,
+                check_type=req.check_type,
+                ts=req.requested_ts,
+                is_late=is_late,
+            )
+            session.add(record)
+            await session.flush()
+            if is_late and req.check_type == "IN":
+                await _queue_late_alert(req.user_id, record.id, req.requested_ts, session, background_tasks)
     await session.commit()
     return {"ok": True, "id": id, "status": req.status}
 
@@ -419,30 +585,48 @@ async def api_leave_apply(
 async def api_leave_mine(
     status_filter: str | None = Query(None, description="PENDING/APPROVED/REJECTED"),
     limit: int = Query(50, ge=1, le=200),
+    user_id: int | None = Query(None, description="Filter by user id (manager only)"),
+    name: str | None = Query(None, description="Filter by name (manager only)"),
     user: dict = Depends(require_roles({"employee", "manager"})),
     session: AsyncSession = Depends(get_session),
 ):
     stmt = (
-        select(LeaveApplication)
-        .where(LeaveApplication.user_id == user["user_id"])
+        select(LeaveApplication, User.username, User.name)
+        .join(User, User.id == LeaveApplication.user_id)
         .order_by(desc(LeaveApplication.created_at))
         .limit(limit)
     )
+    if user["role"] == "employee":
+        stmt = stmt.where(LeaveApplication.user_id == user["user_id"])
+    else:
+        manager_dept = await _manager_dept_id(user, session)
+        if not manager_dept:
+            return []
+        stmt = stmt.where(User.department_id == manager_dept)
+        if user_id:
+            stmt = stmt.where(LeaveApplication.user_id == user_id)
+        if name:
+            stmt = stmt.where(User.name.ilike(f"%{name.strip()}%"))
     if status_filter:
         stmt = stmt.where(LeaveApplication.status == status_filter)
-    rows = (await session.execute(stmt)).scalars().all()
-    return [
-        {
-            "id": r.id,
-            "leave_type": r.leave_type,
-            "start_time": r.start_time.isoformat(),
-            "end_time": r.end_time.isoformat(),
-            "reason": r.reason,
-            "status": r.status,
-            "reviewer_id": r.reviewer_id,
-        }
-        for r in rows
-    ]
+    rows = (await session.execute(stmt)).all()
+    results = []
+    for leave, username, name_value in rows:
+        results.append(
+            {
+                "id": leave.id,
+                "user_id": leave.user_id,
+                "username": username,
+                "name": name_value,
+                "leave_type": leave.leave_type,
+                "start_time": leave.start_time.isoformat(),
+                "end_time": leave.end_time.isoformat(),
+                "reason": leave.reason,
+                "status": leave.status,
+                "reviewer_id": leave.reviewer_id,
+            }
+        )
+    return results
 
 
 @router.get("/manager/review")
@@ -556,16 +740,19 @@ async def api_admin_users_create(
     password = payload.get("password")
     role = (payload.get("role") or "").strip()
     name = (payload.get("name") or "").strip()
+    email = (payload.get("email") or "").strip() or None
     if not username or not password or role not in {"employee", "manager", "admin"} or not name:
         raise HTTPException(status_code=400, detail="username, password, role, name required")
+    if email and "@" not in email:
+        raise HTTPException(status_code=400, detail="email is invalid")
     exists = await session.scalar(select(User).where(User.username == username))
     if exists:
         raise HTTPException(status_code=400, detail="username already exists")
     password_hash = hashlib.sha256(password.encode("utf-8")).hexdigest()
-    user = User(username=username, password_hash=password_hash, role=role, name=name)
+    user = User(username=username, password_hash=password_hash, role=role, name=name, email=email)
     session.add(user)
     await session.commit()
-    return {"ok": True, "id": user.id, "username": username, "role": role, "name": name}
+    return {"ok": True, "id": user.id, "username": username, "role": role, "name": name, "email": email}
 
 
 @router.get("/admin/users")
@@ -582,6 +769,7 @@ async def api_admin_users_list(
             "username": u.username,
             "role": u.role,
             "name": u.name,
+            "email": u.email,
             "department_id": u.department_id,
             "created_at": u.created_at.isoformat(),
         }
@@ -634,6 +822,8 @@ async def api_admin_departments_create(
 ):
     name = (payload.get("name") or "").strip()
     manager_id = payload.get("manager_id")
+    late_start_time = payload.get("late_start_time")
+    late_grace_minutes = payload.get("late_grace_minutes")
     if not name:
         raise HTTPException(status_code=400, detail="name is required")
     exists = await session.scalar(select(Department).where(Department.name == name))
@@ -643,7 +833,23 @@ async def api_admin_departments_create(
         manager = await session.get(User, manager_id)
         if not manager:
             raise HTTPException(status_code=404, detail="manager not found")
+    normalized_start = None
+    if late_start_time is not None:
+        normalized_start = _normalize_hhmm(late_start_time)
+        if not normalized_start:
+            raise HTTPException(status_code=400, detail="late_start_time must be HH:MM")
+    if late_grace_minutes is not None:
+        try:
+            late_grace_minutes = int(late_grace_minutes)
+        except Exception:
+            raise HTTPException(status_code=400, detail="late_grace_minutes must be integer")
+        if late_grace_minutes < 0 or late_grace_minutes > 120:
+            raise HTTPException(status_code=400, detail="late_grace_minutes out of range")
     dept = Department(name=name, manager_id=manager_id)
+    if normalized_start is not None:
+        dept.late_start_time = normalized_start
+    if late_grace_minutes is not None:
+        dept.late_grace_minutes = late_grace_minutes
     session.add(dept)
     await session.commit()
     return {"ok": True, "id": dept.id, "name": name, "manager_id": manager_id}
@@ -672,6 +878,8 @@ async def api_admin_departments_list(
                 "name": d.name,
                 "manager_id": d.manager_id,
                 "manager_name": mgr.username if mgr else None,
+                "late_start_time": d.late_start_time,
+                "late_grace_minutes": d.late_grace_minutes,
                 "members": [
                     {"id": m.id, "username": m.username, "role": m.role} for m in members
                 ],
@@ -679,6 +887,33 @@ async def api_admin_departments_list(
             }
         )
     return results
+
+
+@router.patch("/admin/departments/{dept_id}")
+async def api_admin_departments_update(
+    dept_id: int,
+    payload: dict = Body(...),
+    _: dict = Depends(require_role("admin")),
+    session: AsyncSession = Depends(get_session),
+):
+    dept = await session.get(Department, dept_id)
+    if not dept:
+        raise HTTPException(status_code=404, detail="department not found")
+    if "late_start_time" in payload:
+        normalized = _normalize_hhmm(payload.get("late_start_time"))
+        if not normalized:
+            raise HTTPException(status_code=400, detail="late_start_time must be HH:MM")
+        dept.late_start_time = normalized
+    if "late_grace_minutes" in payload:
+        try:
+            grace = int(payload.get("late_grace_minutes"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="late_grace_minutes must be integer")
+        if grace < 0 or grace > 120:
+            raise HTTPException(status_code=400, detail="late_grace_minutes out of range")
+        dept.late_grace_minutes = grace
+    await session.commit()
+    return {"ok": True, "id": dept.id, "late_start_time": dept.late_start_time, "late_grace_minutes": dept.late_grace_minutes}
 
 
 @router.post("/admin/departments/{dept_id}/assign")

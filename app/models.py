@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String
+from sqlalchemy import Boolean, Column, Date, DateTime, Float, Integer, String
 
 from app.db import Base
 
@@ -13,6 +13,7 @@ class User(Base):
     password_hash = Column(String(128), nullable=False)
     role = Column(String(20), nullable=False)
     name = Column(String(100), nullable=False, default="")
+    email = Column(String(255), nullable=True)
     department_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -64,4 +65,16 @@ class Department(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), unique=True, nullable=False)
     manager_id = Column(Integer, nullable=True)
+    late_start_time = Column(String(5), nullable=True, default="09:00")
+    late_grace_minutes = Column(Integer, nullable=True, default=5)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class LateAlert(Base):
+    __tablename__ = "late_alerts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, nullable=False)
+    checkin_id = Column(Integer, nullable=True)
+    late_date = Column(Date, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
